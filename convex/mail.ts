@@ -1,7 +1,7 @@
 import { v } from "convex/values";
 import { internalMutation, query } from "./_generated/server";
 import { internal } from "./_generated/api";
-import { bareAddress, caseCodeFromSubject } from "./lib/mailUtil";
+import { bareAddress, caseCodeFromSubject, normalizeSubject } from "./lib/mailUtil";
 
 /**
  * Queries and mutations for email state. Runs in Convex's default runtime, so
@@ -114,11 +114,19 @@ export const ingest = internalMutation({
       const code = caseCodeFromSubject(args.subject);
       if (code) {
         caseCode = code;
-        const byCode = await ctx.db
+        // A case code names the estate, not the card, and every card in an
+        // estate shares it. Match the subject back to the letter that started
+        // the conversation; failing that, the most recent letter under that
+        // code is the best guess.
+        const under = await ctx.db
           .query("mailMessages")
           .withIndex("by_caseCode", (q) => q.eq("caseCode", code))
-          .first();
-        targetId = byCode?.targetId;
+          .order("desc")
+          .take(100);
+        const sent = under.filter((m) => m.direction === "out" && m.targetId);
+        const want = normalizeSubject(args.subject);
+        const match = sent.find((m) => normalizeSubject(m.subject) === want) ?? sent[0];
+        targetId = match?.targetId;
       }
     }
 

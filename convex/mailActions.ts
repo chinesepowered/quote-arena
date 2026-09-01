@@ -55,7 +55,7 @@ export const send = internalAction({
     caseCode: v.optional(v.string()),
     targetId: v.optional(v.string()),
   },
-  handler: async (ctx, args): Promise<{ messageId: string; redirected: boolean }> => {
+  handler: async (ctx, args): Promise<{ messageId: string; threadId: string; redirected: boolean }> => {
     assertNotPaused();
     const settings = await ctx.runAction(internal.mailActions.ensureInbox, {});
     const res = await sendMail(settings.inboxId, {
@@ -75,6 +75,8 @@ export const send = internalAction({
       targetId: args.targetId,
     });
     await ctx.runMutation(internal.usage.bump, { provider: "agentmail" });
-    return { messageId: res.messageId, redirected: res.redirected };
+    // The thread id is how a reply finds its way back to this exact card, so
+    // it travels with the result and is stored on the row that sent.
+    return { messageId: res.messageId, threadId: res.threadId, redirected: res.redirected };
   },
 });

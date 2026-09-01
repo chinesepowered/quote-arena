@@ -21,6 +21,22 @@ export function caseCodeFromSubject(subject: string | undefined): string | null 
   return m ? m[1] : null;
 }
 
+/**
+ * A subject reduced to its bare topic, so an inbound "Re: [AFT-7F3K] Notice of
+ * death…" can be matched against the outbound "[to: x@y] [AFT-7F3K] Notice of
+ * death…" that started it. Used only as a fallback when the thread id is
+ * missing.
+ */
+export function normalizeSubject(subject: string | undefined): string {
+  return (subject ?? "")
+    .replace(/\[to:[^\]]*\]/gi, "")
+    .replace(/\[[A-Z]{2,5}-[A-Z0-9]{4}\]/g, "")
+    .replace(/^\s*((re|fw|fwd|aw|sv)\s*:\s*)+/i, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
 /** Never log or display a full address. */
 export function redactEmail(address: string | undefined): string {
   if (!address) return "unknown";
