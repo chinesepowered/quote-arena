@@ -58,6 +58,7 @@ export function Leaderboard(p: Props) {
   const prevRanks = useRef<Map<string, number | null>>(new Map());
   const prevQuoteIds = useRef<Map<string, string>>(new Map());
   const [moves, setMoves] = useState<Record<string, { delta: number; fresh: boolean; updated: boolean }>>({});
+  const [movesKey, setMovesKey] = useState(0);
   const [banner, setBanner] = useState<{ name: string; key: number } | null>(null);
   const firstRender = useRef(true);
 
@@ -79,11 +80,18 @@ export function Leaderboard(p: Props) {
     firstRender.current = false;
     if (Object.keys(next).length) {
       setMoves(next);
-      const t = setTimeout(() => setMoves({}), 4000);
+      setMovesKey(Date.now());
       if (newLeader) setBanner({ name: newLeader, key: Date.now() });
-      return () => clearTimeout(t);
     }
   }, [quotes]);
+
+  // Clearing lives in its own effect keyed on the move batch, so an unrelated
+  // re-render can never cancel the timer and leave a badge stuck on a card.
+  useEffect(() => {
+    if (!movesKey) return;
+    const t = setTimeout(() => setMoves({}), 4000);
+    return () => clearTimeout(t);
+  }, [movesKey]);
 
   useEffect(() => {
     if (!banner) return;

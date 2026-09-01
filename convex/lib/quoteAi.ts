@@ -198,12 +198,18 @@ export function heuristicQuote(text: string): z.infer<typeof QuoteSchema> | null
     text.match(/\b(next week|this week|tomorrow|next month|(?:\d+|a|two|three)\s+weeks?\s+out|start(?:ing)?\s+[^.,;\n]{2,30})/i);
   const clip = (s: string) =>
     s.split(/,?\s*(?:but\s+)?(?:excludes?|excluding|not including|does ?n[o']t include|extra for)\b/i)[0].trim();
-  const includes = [...text.matchAll(/\b(?:includes?|including|incl\.)\s+([^.;\n]{3,80})/gi)]
-    .map((m) => clip(m[1]))
-    .filter(Boolean);
+  // "does not include staining" must not become an *include*: reject a match
+  // whose preceding words negate it.
+  const NEGATED = /\b(?:not|n['’]t|never|without|excluding|except|minus|apart from|aside from|other than)\s+(?:\w+\s+){0,2}$/i;
+  const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
   const excludes = [
     ...text.matchAll(/\b(?:excludes?|excluding|not including|doesn'?t include|does not include|extra for)\s+([^.;\n]{3,80})/gi),
   ].map((m) => m[1].trim());
+  const excludedSet = new Set(excludes.map(norm));
+  const includes = [...text.matchAll(/\b(?:includes?|including|incl\.)\s+([^.;\n]{3,80})/gi)]
+    .filter((m) => !NEGATED.test(text.slice(Math.max(0, (m.index ?? 0) - 32), m.index ?? 0)))
+    .map((m) => clip(m[1]))
+    .filter((s) => s && !excludedSet.has(norm(s)));
   const cur = /USD|US\$/i.test(text) ? "USD" : /£/.test(text) ? "GBP" : /€/.test(text) ? "EUR" : "CAD";
   return {
     priceLow: Math.min(...real),
