@@ -114,7 +114,7 @@ export function Home() {
           ))}
           {mine && mine.length === 0 && (
             <div className="rounded-2xl border-2 border-dashed border-stone-200 p-6 text-center text-sm text-stone-500">
-              No jobs yet. <button className="font-semibold text-stone-900 underline" onClick={() => navigate("/new")}>Post your first</button> — it takes a minute.
+              No jobs of your own yet. <button className="font-semibold text-stone-900 underline" onClick={() => navigate("/new")}>Post your first</button> — it takes a minute.
             </div>
           )}
         </div>
