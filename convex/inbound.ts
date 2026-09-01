@@ -4,7 +4,6 @@ import { v } from "convex/values";
 import { internalAction } from "./_generated/server";
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
-import { assertNotPaused, rateLimiter } from "./lib/limits";
 import { bareAddress, caseCodeFromSubject } from "./lib/mailUtil";
 import {
   AnswersSchema,
@@ -13,7 +12,7 @@ import {
   heuristicAnswer,
   InboundAnalysisSchema,
   type InboundAnalysis,
-  tryExtract,
+  aiExtract,
 } from "./lib/quoteAi";
 
 /**
@@ -105,12 +104,9 @@ export const onInbound = internalAction({
     let analysis: InboundAnalysis;
     let model = HEURISTIC;
     let aiState = "ai_unavailable";
-    try {
-      assertNotPaused();
-      await rateLimiter.limit(ctx, "globalBurst", { throws: true });
-      await rateLimiter.limit(ctx, "globalLlm", { throws: true });
-      await ctx.runMutation(internal.usage.bump, { provider: "llm" });
-      const res = await tryExtract(
+    {
+      const res = await aiExtract(
+        ctx,
         InboundAnalysisSchema,
         `A homeowner asked local contractors for quotes on this job:\n` +
           `Title: ${job.title}\nTrade: ${job.trade}\nLocation: ${job.city}, ${job.region}\nDetails: ${job.description}\nTiming: ${job.timing}\n\n` +
@@ -128,9 +124,6 @@ export const onInbound = internalAction({
         console.warn("inbound analysis fell back to heuristics:", res.error);
         analysis = heuristicAnalysis(text);
       }
-    } catch (e) {
-      console.warn("inbound analysis skipped LLM:", String(e));
-      analysis = heuristicAnalysis(text);
     }
 
     await ctx.runMutation(internal.messages.classify, {
@@ -169,10 +162,9 @@ export const onInbound = internalAction({
     if (questions.length) {
       let answers: { question: string; answer: string; grounded: boolean; model: string }[] | null = null;
       if (aiState === "ok") {
-        try {
-          await rateLimiter.limit(ctx, "globalLlm", { throws: true });
-          await ctx.runMutation(internal.usage.bump, { provider: "llm" });
-          const res = await tryExtract(
+        {
+          const res = await aiExtract(
+            ctx,
             AnswersSchema,
             `Job facts (the ONLY source of truth):\nTitle: ${job.title}\nTrade: ${job.trade}\nLocation: ${job.city}, ${job.region}\n` +
               `Details: ${job.description}\nTiming: ${job.timing}\nBudget: ${job.budgetBand ?? "not shared"}\nPhotos: ${job.photos.length} attached to the original email.\n\n` +
@@ -182,8 +174,7 @@ export const onInbound = internalAction({
             { system: "Answer only from the job facts; if unknown, ask the homeowner. Never invent measurements or conditions.", maxTokens: 900 },
           );
           if (res.ok) answers = res.data.answers.map((a) => ({ ...a, model: res.model }));
-        } catch (e) {
-          console.warn("answer drafting skipped:", String(e));
+          else console.warn("answer drafting skipped:", res.error);
         }
       }
       for (let i = 0; i < questions.length; i++) {

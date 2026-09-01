@@ -13,6 +13,14 @@ import type { Id } from "./_generated/dataModel";
  * All contractor addresses are fictional `.example` domains; outbound mail is
  * redirected by DEMO_RECIPIENT_OVERRIDE anyway.
  */
+/** Dev helper: put one contractor into "queued" so rfq.send can be exercised from the CLI. */
+export const queueContractor = internalMutation({
+  args: { contractorId: v.id("contractors") },
+  handler: async (ctx, { contractorId }) => {
+    await ctx.db.patch(contractorId, { rfqStatus: "queued", selected: true });
+  },
+});
+
 export const demo = internalMutation({
   args: { slug: v.optional(v.string()) },
   handler: async (ctx, { slug }) => {

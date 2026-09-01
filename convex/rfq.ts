@@ -4,8 +4,9 @@ import { v } from "convex/values";
 import { internalAction } from "./_generated/server";
 import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
+import type { ActionCtx } from "./_generated/server";
 import { assertNotPaused, isRateLimitError, QUOTA_MESSAGE, rateLimiter } from "./lib/limits";
-import { templateRfq, tryDraft } from "./lib/quoteAi";
+import { aiDraft, templateRfq } from "./lib/quoteAi";
 import { APP_NAME } from "./lib/app";
 
 /**
@@ -26,7 +27,7 @@ function textToHtml(text: string) {
   return `<div style="font:15px/1.5 -apple-system,Segoe UI,Helvetica,Arial,sans-serif;color:#1c1917;white-space:pre-wrap">${linked}</div>`;
 }
 
-async function draftRfq(job: {
+async function draftRfq(ctx: ActionCtx, job: {
   title: string;
   trade: string;
   description: string;
@@ -45,7 +46,7 @@ async function draftRfq(job: {
     `Job title: ${job.title}\nTrade: ${job.trade}\nLocation: ${job.city}, ${job.region}\nDetails: ${job.description}\n` +
     `Timing: ${job.timing}\n${job.budgetBand ? `Budget: ${job.budgetBand}\n` : ""}` +
     (job.photos.length ? `Photo links to include verbatim, one per line:\n${job.photos.map((p) => p.url).join("\n")}\n` : "");
-  const res = await tryDraft(prompt, { system: "You write concise, warm, practical emails for homeowners.", maxTokens: 600 });
+  const res = await aiDraft(ctx, prompt, { system: "You write concise, warm, practical emails for homeowners.", maxTokens: 600 });
   if (res.ok && res.data.length > 80) return { text: res.data, model: res.model };
   return { text: fallback, model: "template" };
 }
@@ -65,14 +66,7 @@ export const send = internalAction({
     }
 
     // One draft for the whole batch (LLM, falling back to a template).
-    let body: { text: string; model: string };
-    try {
-      await rateLimiter.limit(ctx, "globalLlm", { throws: true });
-      await ctx.runMutation(internal.usage.bump, { provider: "llm" });
-      body = await draftRfq(job);
-    } catch {
-      body = { text: templateRfq(job), model: "template" };
-    }
+    const body = await draftRfq(ctx, job);
     const subject = `Quote request: ${job.title} in ${job.city}`;
     const text = body.text + SIGNATURE;
 

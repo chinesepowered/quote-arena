@@ -1,7 +1,10 @@
 "use node";
 
 import { z } from "zod";
+import type { ActionCtx } from "../_generated/server";
+import { internal } from "../_generated/api";
 import { draft, extract, modelId } from "./llm";
+import { assertNotPaused, isRateLimitError, QUOTA_MESSAGE, rateLimiter } from "./limits";
 
 /**
  * Quote Arena's AI layer. Every call goes through `tryExtract`/`tryDraft`,
@@ -57,6 +60,57 @@ export async function tryDraft(prompt: string, opts: { system?: string; maxToken
   } catch (e) {
     return { ok: false, error: String(e instanceof Error ? e.message : e).slice(0, 300) };
   }
+}
+
+/**
+ * The one entry point product actions use for structured extraction. Applies,
+ * in order: the pause switch, the circuit breaker, global rate limits, usage
+ * metering, the soft timeout, and records the outcome for the breaker.
+ */
+export async function aiExtract<T>(
+  ctx: ActionCtx,
+  schema: z.ZodType<T>,
+  prompt: string,
+  opts: { system?: string; maxTokens?: number; userKey?: string } = {},
+): Promise<AiResult<T>> {
+  const gate = await aiGate(ctx, opts.userKey);
+  if (gate) return gate;
+  const res = await tryExtract(schema, prompt, opts);
+  await ctx.runMutation(internal.aiHealth.record, { ok: res.ok, error: res.ok ? undefined : res.error });
+  return res;
+}
+
+/** Same gates as aiExtract, for free-text drafting. */
+export async function aiDraft(
+  ctx: ActionCtx,
+  prompt: string,
+  opts: { system?: string; maxTokens?: number; userKey?: string } = {},
+): Promise<AiResult<string>> {
+  const gate = await aiGate(ctx, opts.userKey);
+  if (gate) return gate;
+  const res = await tryDraft(prompt, opts);
+  await ctx.runMutation(internal.aiHealth.record, { ok: res.ok, error: res.ok ? undefined : res.error });
+  return res;
+}
+
+async function aiGate(ctx: ActionCtx, userKey?: string): Promise<{ ok: false; error: string } | null> {
+  try {
+    assertNotPaused();
+  } catch (e) {
+    return { ok: false, error: String(e instanceof Error ? e.message : e) };
+  }
+  if (!(await ctx.runQuery(internal.aiHealth.shouldTry, {}))) {
+    return { ok: false, error: "LLM circuit open (recent failures); skipped" };
+  }
+  try {
+    await rateLimiter.limit(ctx, "globalBurst", { throws: true });
+    await rateLimiter.limit(ctx, "globalLlm", { throws: true });
+    if (userKey) await rateLimiter.limit(ctx, "userLlm", { key: userKey, throws: true });
+  } catch (e) {
+    return { ok: false, error: isRateLimitError(e) ? QUOTA_MESSAGE : String(e) };
+  }
+  await ctx.runMutation(internal.usage.bump, { provider: "llm" });
+  return null;
 }
 
 // ───────────────────────── schemas ─────────────────────────
@@ -122,10 +176,18 @@ export function heuristicQuote(text: string): z.infer<typeof QuoteSchema> | null
   // "$3,200-3,600" / "3200 to 3600": pick up the bare second number after a dash/to.
   const range = text.match(/\$?\s?(\d{1,3}(?:,\d{3})+|\d{3,6})\s?(?:-|–|—|to)\s?\$?\s?(\d{1,3}(?:,\d{3})+|\d{3,6})/);
   if (range) prices.push(toNumber(range[1]), toNumber(range[2]));
+  // Bare "4k" / "3.5k" with no currency symbol.
+  for (const m of text.matchAll(/(?<![\d.])(\d{1,2}(?:\.\d)?)k\b/gi)) prices.push(Number(m[1]) * 1000);
   const real = prices.filter((p) => p >= 50 && p < 10_000_000);
   if (!real.length) return null;
 
-  const timeline = text.match(/(\d+(?:\.\d+)?)\s*(day|week|month)s?\b/i);
+  // Duration of the work ("takes 2 days", "finish in 3 days") — not lead time ("2 weeks out").
+  const timeline =
+    text.match(
+      /(?:takes?|taking|done|complete[ds]?|finish(?:ed)?|wrap(?:ped)? up|need)\s+(?:about|around|roughly|in|us)?\s*(?:about|around|roughly|in)?\s*(\d+(?:\.\d+)?)\s*(day|week|month)s?\b/i,
+    ) ??
+    text.match(/(\d+(?:\.\d+)?)\s*(day|week|month)s?(?:\s+(?:of work|on site|job|build|install))\b/i) ??
+    text.match(/(\d+(?:\.\d+)?)\s*(day|week|month)s?\b(?!\s*(?:out|from now|away|lead|wait|notice|booked))/i);
   let timelineDays: number | null = null;
   if (timeline) {
     const n = Number(timeline[1]);
@@ -134,7 +196,11 @@ export function heuristicQuote(text: string): z.infer<typeof QuoteSchema> | null
   }
   const startM =
     text.match(/\b(next week|this week|tomorrow|next month|(?:\d+|a|two|three)\s+weeks?\s+out|start(?:ing)?\s+[^.,;\n]{2,30})/i);
-  const includes = [...text.matchAll(/\b(?:includes?|including|incl\.)\s+([^.;\n]{3,80})/gi)].map((m) => m[1].trim());
+  const clip = (s: string) =>
+    s.split(/,?\s*(?:but\s+)?(?:excludes?|excluding|not including|does ?n[o']t include|extra for)\b/i)[0].trim();
+  const includes = [...text.matchAll(/\b(?:includes?|including|incl\.)\s+([^.;\n]{3,80})/gi)]
+    .map((m) => clip(m[1]))
+    .filter(Boolean);
   const excludes = [
     ...text.matchAll(/\b(?:excludes?|excluding|not including|doesn'?t include|does not include|extra for)\s+([^.;\n]{3,80})/gi),
   ].map((m) => m[1].trim());
@@ -144,7 +210,7 @@ export function heuristicQuote(text: string): z.infer<typeof QuoteSchema> | null
     priceHigh: Math.max(...real),
     currency: cur,
     timelineDays,
-    startEarliest: startM ? startM[1] : null,
+    startEarliest: startM ? startM[1].split(/\s+(?:and|then|,)\s+/)[0].trim() : null,
     includes,
     excludes,
     notes: null,
@@ -154,7 +220,7 @@ export function heuristicQuote(text: string): z.infer<typeof QuoteSchema> | null
 
 export function heuristicQuestions(text: string): string[] {
   return text
-    .split(/(?<=[?])\s+|\n+/)
+    .split(/(?<=[.!?])\s+|\n+/)
     .map((s) => s.trim())
     .filter((s) => s.endsWith("?") && s.length > 8 && s.length < 240)
     .slice(0, 5);
@@ -227,16 +293,23 @@ export function findEmail(markdown: string): string | undefined {
 
 export function heuristicContractor(hit: { url: string; title?: string; description?: string; markdown?: string }) {
   const md = hit.markdown ?? "";
-  const rawTitle = (hit.title ?? "").split(/\s[|\-–—•:]\s/)[0].trim();
-  let name = rawTitle;
-  if (!name) {
-    try {
-      name = new URL(hit.url).hostname.replace(/^www\./, "").split(".")[0];
-      name = name.charAt(0).toUpperCase() + name.slice(1);
-    } catch {
-      name = "Contractor";
-    }
+  const segments = (hit.title ?? "")
+    .split(/\s[|\-–—•:]\s/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  let domainName = "Contractor";
+  try {
+    const d = new URL(hit.url).hostname.replace(/^www\./, "").split(".")[0];
+    domainName = d.charAt(0).toUpperCase() + d.slice(1);
+  } catch {
+    /* keep default */
   }
+  // SEO titles ("Fence Contractor Waterloo | Star Fencing") often lead with a
+  // generic phrase; prefer a short brand-like segment, else the domain.
+  const generic =
+    /^(?:best|top|local|affordable|professional)?\s*(?:[a-z]+\s+){0,2}(?:contractors?|company|companies|services?|installation|repair|repairs|experts?|pros?)\b/i;
+  const brand = segments.find((seg) => seg.split(/\s+/).length <= 4 && !generic.test(seg)) ?? segments[0];
+  const name = brand && brand.split(/\s+/).length <= 5 && !generic.test(brand) ? brand : domainName;
   const phone = md.match(PHONE_RE)?.[0];
   const email = findEmail(md) ?? findEmail(hit.description ?? "");
   let website: string | undefined;

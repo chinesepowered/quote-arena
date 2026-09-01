@@ -9,6 +9,7 @@
  */
 
 import type * as ai from "../ai.js";
+import type * as aiHealth from "../aiHealth.js";
 import type * as auth from "../auth.js";
 import type * as contractors from "../contractors.js";
 import type * as crons from "../crons.js";
@@ -46,6 +47,7 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   ai: typeof ai;
+  aiHealth: typeof aiHealth;
   auth: typeof auth;
   contractors: typeof contractors;
   crons: typeof crons;

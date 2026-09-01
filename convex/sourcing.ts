@@ -12,7 +12,7 @@ import {
   HEURISTIC,
   heuristicContractor,
   looksLikeDirectory,
-  tryExtract,
+  aiExtract,
 } from "./lib/quoteAi";
 
 /**
@@ -84,9 +84,7 @@ export const discover = internalAction({
     type Extracted = ReturnType<typeof heuristicContractor> & { isDirectory: boolean; model: string };
     const extracted = new Map<number, Extracted>();
     let llmOk = false;
-    try {
-      await rateLimiter.limit(ctx, "globalLlm", { throws: true });
-      await ctx.runMutation(internal.usage.bump, { provider: "llm" });
+    {
       const prompt =
         `Job: ${job.trade} in ${where}.\n` +
         `Below are ${hits.length} web pages found by searching for local contractors. For EACH page (by sourceIndex), ` +
@@ -99,9 +97,10 @@ export const discover = internalAction({
               `Content:\n${excerpt(h.markdown ?? "", 1800)}`,
           )
           .join("\n\n");
-      const res = await tryExtract(ContractorBatchSchema, prompt, {
+      const res = await aiExtract(ctx, ContractorBatchSchema, prompt, {
         system: "You extract structured business contact data from web pages. Be precise and conservative.",
         maxTokens: 2000,
+        userKey: job.ownerId ?? undefined,
       });
       if (res.ok) {
         llmOk = true;
@@ -124,8 +123,6 @@ export const discover = internalAction({
       } else {
         console.warn("contractor extraction fell back to heuristics:", res.error);
       }
-    } catch (e) {
-      console.warn("LLM skipped for sourcing:", String(e));
     }
     hits.forEach((h, i) => {
       if (!extracted.has(i)) extracted.set(i, { ...heuristicContractor(h), isDirectory: false, model: HEURISTIC });

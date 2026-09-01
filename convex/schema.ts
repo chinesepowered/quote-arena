@@ -76,6 +76,15 @@ export default defineSchema({
     .index("by_target", ["targetId"])
     .index("by_routed", ["routed"]),
 
+  /** Singleton: LLM circuit-breaker state (see aiHealth.ts). */
+  aiHealth: defineTable({
+    key: v.string(),
+    consecutiveFailures: v.number(),
+    lastFailureAt: v.number(),
+    lastSuccessAt: v.number(),
+    lastError: v.optional(v.string()),
+  }).index("by_key", ["key"]),
+
   /** Sender address to product row, for "forward your email here" flows. */
   senderRoutes: defineTable({
     email: v.string(),

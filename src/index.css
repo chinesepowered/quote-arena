@@ -1,1 +1,21 @@
 @import "tailwindcss";
+
+@theme {
+  --font-display: "Bricolage Grotesque", "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+html {
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+.font-display {
+  font-family: var(--font-display);
+}
+
+/* Softer scrollbars in the side panels */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(214 211 209) transparent;
+}
