@@ -17,6 +17,7 @@ export function Arena({ slug }: { slug: string }) {
   const contractors = useQuery(api.contractors.list, job ? { jobId: job._id } : "skip");
   const board = useQuery(api.quotes.leaderboard, job ? { jobId: job._id } : "skip");
   const pendingQuestions = useQuery(api.questions.pendingCount, job ? { jobId: job._id } : "skip");
+  const ai = useQuery(api.aiHealth.status);
   const decide = useMutation(api.jobs.decide);
   const reopen = useMutation(api.jobs.reopen);
   const toast = useToast();
@@ -175,9 +176,16 @@ export function Arena({ slug }: { slug: string }) {
                 live
               </span>
             </div>
-            <Button variant={compareIds.length ? "primary" : "secondary"} size="sm" onClick={() => setCompareOpen(true)} disabled={!compareIds.length}>
-              Compare {compareIds.length ? `(${compareIds.length})` : ""}
-            </Button>
+            <div className="flex items-center gap-2">
+              {ai && ai.state !== "ok" && ai.state !== "unknown" && (
+                <Tooltip wide content={<span>The AI model endpoint {ai.state === "down" ? "is timing out, so extraction is skipped for a few minutes and" : "recently failed, so"} replies are pattern-matched from the email text instead. It retries automatically. Last error: {ai.lastError ?? "unknown"}</span>}>
+                  <span className="cursor-help rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-900 ring-1 ring-amber-300">AI {ai.state === "down" ? "paused" : "degraded"} · pattern matching</span>
+                </Tooltip>
+              )}
+              <Button variant={compareIds.length ? "primary" : "secondary"} size="sm" onClick={() => setCompareOpen(true)} disabled={!compareIds.length}>
+                Compare {compareIds.length ? `(${compareIds.length})` : ""}
+              </Button>
+            </div>
           </div>
           {board ? (
             <Leaderboard

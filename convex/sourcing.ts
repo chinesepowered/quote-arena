@@ -107,7 +107,7 @@ export const discover = internalAction({
         for (const c of res.data.contractors) {
           const hit = hits[c.sourceIndex];
           if (!hit) continue;
-          const fallback = heuristicContractor(hit);
+          const fallback = heuristicContractor(hit, { city: job.city });
           extracted.set(c.sourceIndex, {
             name: c.name || fallback.name,
             email: c.email ?? fallback.email,
@@ -116,7 +116,7 @@ export const discover = internalAction({
             services: c.services,
             serviceArea: c.serviceArea ?? undefined,
             ratingSnippet: c.ratingSnippet ?? undefined,
-            isDirectory: c.isDirectory,
+            isDirectory: c.isDirectory || fallback.isDirectory,
             model: res.model,
           });
         }
@@ -125,7 +125,7 @@ export const discover = internalAction({
       }
     }
     hits.forEach((h, i) => {
-      if (!extracted.has(i)) extracted.set(i, { ...heuristicContractor(h), isDirectory: false, model: HEURISTIC });
+      if (!extracted.has(i)) extracted.set(i, { ...heuristicContractor(h, { city: job.city }), model: HEURISTIC });
     });
 
     // 3. Write rows as we go so the list fills in live.

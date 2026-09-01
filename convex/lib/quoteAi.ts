@@ -291,7 +291,29 @@ export function findEmail(markdown: string): string | undefined {
   return good[0];
 }
 
-export function heuristicContractor(hit: { url: string; title?: string; description?: string; markdown?: string }) {
+const TRADE_WORDS =
+  "roofing|roofers?|fencing|fences?|plumbing|plumbers?|electric(?:al)?|painting|painters?|landscaping|landscapes?|construction|contracting|contractors?|renovations?|reno|builders?|building|siding|homes?|exteriors?|interiors?|services?|group|inc|ltd|co|solutions|works|decks?|windows|doors|hvac|heating|cooling|flooring|floors|kitchens?|baths?|bathrooms?|masonry|concrete|paving|handyman|maintenance|restoration|cedar|wood|steel|iron|pro|pros";
+const DOMAIN_SPLIT_RE = new RegExp(`^(.{3,}?)(${TRADE_WORDS})$`, "i");
+
+/** "reuterroofing" → "Reuter Roofing"; "yrs-roofing" → "Yrs Roofing"; unknown shapes stay as-is. */
+export function prettyDomainName(hostLabel: string): string {
+  const cleaned = hostLabel.replace(/[-_]+/g, " ").trim();
+  const cap = (w: string) => (w.length <= 3 && !/[aeiou]/i.test(w) ? w.toUpperCase() : w.charAt(0).toUpperCase() + w.slice(1));
+  if (cleaned.includes(" ")) return cleaned.split(/\s+/).map(cap).join(" ");
+  const m = cleaned.match(DOMAIN_SPLIT_RE);
+  if (m) return `${cap(m[1])} ${cap(m[2])}`;
+  return cap(cleaned);
+}
+
+/** Listicle / roundup titles are directories, not a contractor's own page. */
+export function looksLikeListicle(title?: string): boolean {
+  return /^(?:the\s+)?(?:\d+\s+)?(?:best|top)\b|\bnear (?:me|you)\b|\bdirectory\b|\breviews?\s+(?:of|for)\b/i.test(title ?? "");
+}
+
+export function heuristicContractor(
+  hit: { url: string; title?: string; description?: string; markdown?: string },
+  opts: { city?: string } = {},
+) {
   const md = hit.markdown ?? "";
   const segments = (hit.title ?? "")
     .split(/\s[|\-–—•:]\s/)
@@ -299,17 +321,18 @@ export function heuristicContractor(hit: { url: string; title?: string; descript
     .filter(Boolean);
   let domainName = "Contractor";
   try {
-    const d = new URL(hit.url).hostname.replace(/^www\./, "").split(".")[0];
-    domainName = d.charAt(0).toUpperCase() + d.slice(1);
+    domainName = prettyDomainName(new URL(hit.url).hostname.replace(/^www\./, "").split(".")[0]);
   } catch {
     /* keep default */
   }
   // SEO titles ("Fence Contractor Waterloo | Star Fencing") often lead with a
-  // generic phrase; prefer a short brand-like segment, else the domain.
+  // generic phrase or a place name; prefer a short brand-like segment, else the domain.
   const generic =
-    /^(?:best|top|local|affordable|professional)?\s*(?:[a-z]+\s+){0,2}(?:contractors?|company|companies|services?|installation|repair|repairs|experts?|pros?)\b/i;
-  const brand = segments.find((seg) => seg.split(/\s+/).length <= 4 && !generic.test(seg)) ?? segments[0];
-  const name = brand && brand.split(/\s+/).length <= 5 && !generic.test(brand) ? brand : domainName;
+    /^(?:best|top|local|affordable|professional|home)?\s*(?:[a-z]+\s+){0,2}(?:contractors?|company|companies|services?|installation|repair|repairs|experts?|pros?|quotes?|estimates?)\b/i;
+  const city = opts.city?.toLowerCase();
+  const placey = (seg: string) => (city ? seg.toLowerCase().includes(city) : false) || /\b(?:ontario|canada|usa|region|area|county)\b/i.test(seg);
+  const brand = segments.find((seg) => seg.split(/\s+/).length <= 4 && !generic.test(seg) && !placey(seg));
+  const name = brand ?? domainName;
   const phone = md.match(PHONE_RE)?.[0];
   const email = findEmail(md) ?? findEmail(hit.description ?? "");
   let website: string | undefined;
@@ -318,7 +341,16 @@ export function heuristicContractor(hit: { url: string; title?: string; descript
   } catch {
     website = undefined;
   }
-  return { name: name.slice(0, 80), email, phone, website, services: [] as string[], serviceArea: undefined as string | undefined, ratingSnippet: undefined as string | undefined };
+  return {
+    name: name.slice(0, 80),
+    email,
+    phone,
+    website,
+    services: [] as string[],
+    serviceArea: undefined as string | undefined,
+    ratingSnippet: undefined as string | undefined,
+    isDirectory: looksLikeListicle(hit.title),
+  };
 }
 
 /** Plain-text RFQ used when the LLM cannot draft one. Reads well on its own. */

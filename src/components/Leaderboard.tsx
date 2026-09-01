@@ -229,11 +229,7 @@ function QuoteCard({
         />
       )}
       {top && !isWinner && <span className="pointer-events-none absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-amber-300 via-yellow-400 to-orange-500" />}
-      {isWinner && (
-        <span className="absolute right-0 top-0 rounded-bl-xl bg-emerald-500 px-3 py-1 text-xs font-bold uppercase tracking-wider text-white">
-          Winner
-        </span>
-      )}
+      {isWinner && <span className="pointer-events-none absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-emerald-400 via-emerald-500 to-teal-400" />}
 
       <div className="flex gap-4 p-4 sm:p-5">
         {/* Rank */}
@@ -274,6 +270,9 @@ function QuoteCard({
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
                 <h3 className="truncate font-display text-lg font-semibold tracking-tight text-stone-900">{q.contractorName}</h3>
+                {isWinner && (
+                  <span className="rounded-full bg-emerald-500 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-white shadow-sm shadow-emerald-500/40">🏆 Winner</span>
+                )}
                 {q.revision > 1 && (
                   <Pill tone="violet" title="This contractor revised their quote; the older one was superseded">
                     rev {q.revision}
