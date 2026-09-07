@@ -22,10 +22,19 @@ import {
  *
  * Budget: 2 searches (limit 5 each, ~2 credits) + at most 3 contact-page
  * scrapes per run, all with a 24h cache window.
+ *
+ * Every crawl goes through the gateway in lib/firecrawl.ts, which serves a
+ * stored result when it has one and refuses to spend when the shared credit
+ * pool is near its reserve. A refusal is not an error: whatever contractors
+ * are already on the board stay there, we simply stop adding more and say so.
  */
 
 const SEARCH_LIMIT = 5;
 const MAX_CONTACT_SCRAPES = 3;
+
+/** Shown when the credit guard stops a live search. Honest, not alarming. */
+const BUDGET_NOTE =
+  "Showing saved results — live contractor search is paused to protect the shared crawl budget.";
 
 export const discover = internalAction({
   args: { jobId: v.id("jobs") },
@@ -52,11 +61,15 @@ export const discover = internalAction({
     // 1. Search (both variants), de-duplicated by host, directories dropped.
     const hits: SearchHit[] = [];
     const seen = new Set<string>();
+    /** True once the credit guard has refused a live crawl this run. */
+    let budgetPaused = false;
     for (const q of queries) {
       try {
-        const res = await search(q, SEARCH_LIMIT);
-        await ctx.runMutation(internal.usage.bump, { provider: "firecrawl" });
-        for (const h of res) {
+        const res = await search(ctx, q, SEARCH_LIMIT);
+        if (res.reason === "budget") budgetPaused = true;
+        // Only meter what we actually spent; a stored result is free.
+        if (!res.cached) await ctx.runMutation(internal.usage.bump, { provider: "firecrawl" });
+        for (const h of res.data ?? []) {
           if (!h.url) continue;
           let host = "";
           try {
@@ -69,13 +82,20 @@ export const discover = internalAction({
           hits.push(h);
         }
         await setSourcing({ state: "running", note: `Read ${hits.length} contractor pages, extracting details…` });
+        // Nothing stored and nothing affordable: stop early rather than burn
+        // the second query on the same refusal.
+        if (res.reason === "budget" && !res.data) break;
       } catch (e) {
         console.error("firecrawl search failed", String(e));
       }
     }
 
     if (!hits.length) {
-      await setSourcing({ state: "done", note: "No contractor sites found. Add one by hand.", found: 0 });
+      await setSourcing({
+        state: "done",
+        note: budgetPaused ? BUDGET_NOTE : "No contractor sites found. Add one by hand.",
+        found: 0,
+      });
       return;
     }
 
@@ -154,18 +174,29 @@ export const discover = internalAction({
     }
 
     // 4. Contact-page pass for sites whose homepage had no email (capped).
+    //    Purely additive: a refusal here just leaves the row without an email.
     let scrapes = 0;
     for (const { id, website } of needEmail) {
       if (scrapes >= MAX_CONTACT_SCRAPES) break;
       try {
-        const links = await map(website, 25);
-        await ctx.runMutation(internal.usage.bump, { provider: "firecrawl" });
-        const contact = links.find((l) => /contact|about|get-in-touch|quote|estimate/i.test(l));
+        const mapped = await map(ctx, website, 25);
+        if (mapped.reason === "budget") budgetPaused = true;
+        if (!mapped.cached) await ctx.runMutation(internal.usage.bump, { provider: "firecrawl" });
+        if (!mapped.data) {
+          if (mapped.reason === "budget") break;
+          continue;
+        }
+        const contact = mapped.data.find((l) => /contact|about|get-in-touch|quote|estimate/i.test(l));
         if (!contact) continue;
         scrapes++;
-        const page = await scrape(contact);
-        await ctx.runMutation(internal.usage.bump, { provider: "firecrawl" });
-        const email = findEmail(page.markdown);
+        const page = await scrape(ctx, contact);
+        if (page.reason === "budget") budgetPaused = true;
+        if (!page.cached) await ctx.runMutation(internal.usage.bump, { provider: "firecrawl" });
+        if (!page.data) {
+          if (page.reason === "budget") break;
+          continue;
+        }
+        const email = findEmail(page.data.markdown);
         if (email) {
           await ctx.runMutation(internal.contractors.patchContact, { contractorId: id, email, contactUrl: contact });
         }
@@ -177,7 +208,23 @@ export const discover = internalAction({
     await setSourcing({
       state: "done",
       found,
-      note: `Found ${found} contractor${found === 1 ? "" : "s"} from ${hits.length} pages${llmOk ? "" : " (AI extraction unavailable, used pattern matching)"}.`,
+      note:
+        `Found ${found} contractor${found === 1 ? "" : "s"} from ${hits.length} pages` +
+        `${llmOk ? "" : " (AI extraction unavailable, used pattern matching)"}.` +
+        `${budgetPaused ? ` ${BUDGET_NOTE}` : ""}`,
     });
+  },
+});
+
+/**
+ * Ops probe: exercise the crawl gateway directly, bypassing the per-call token,
+ * so the credit guard and the stored-result fallback can be checked on a live
+ * deployment without touching product state.
+ */
+export const budgetProbe = internalAction({
+  args: { url: v.string() },
+  handler: async (ctx, { url }): Promise<{ hasData: boolean; cached: boolean; stale: boolean; reason?: string }> => {
+    const r = await scrape(ctx, url);
+    return { hasData: Boolean(r.data), cached: r.cached, stale: r.stale, reason: r.reason };
   },
 });
