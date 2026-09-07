@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useMutation } from "convex/react";
+import { useMutation, useQuery } from "convex/react";
 import { AnimatePresence, motion } from "motion/react";
 import { api } from "../../convex/_generated/api";
 import type { Doc, Id } from "../../convex/_generated/dataModel";
@@ -38,6 +38,10 @@ export function ContractorPanel({
 
   const sourcing = job.sourcing;
   const running = sourcing?.state === "running";
+  // Firecrawl runs on a shared credit pool. When it is reserved, say so rather
+  // than let the panel look broken.
+  const crawl = useQuery(api.crawlCache.status);
+  const crawlPaused = crawl ? !crawl.live : false;
   const ready = contractors.filter((c) => c.selected && c.email && c.rfqStatus === "none");
 
   const onSend = async () => {
@@ -68,7 +72,7 @@ export function ContractorPanel({
                 toast(friendlyError(e), "error");
               }
             }}
-            title="Search the web again with Firecrawl"
+            title={crawlPaused ? "Live crawling is paused to protect the shared budget — this will replay saved results" : "Search the web again with Firecrawl"}
           >
             {running ? <Spinner className="size-3" /> : "🔥"} Find more
           </Button>
@@ -106,6 +110,17 @@ export function ContractorPanel({
         )}
       </AnimatePresence>
 
+      {/* Shared crawl budget reserved: saved results only. */}
+      {crawlPaused && (
+        <div className="mt-2 flex items-start gap-2 rounded-xl bg-sky-50 px-3 py-2 text-xs text-sky-900 ring-1 ring-sky-200">
+          <span className="shrink-0">💤</span>
+          <div>
+            <div className="font-medium">Live search is resting</div>
+            <div className="opacity-80">Showing saved results — live contractor search is paused to protect the shared crawl budget. Everything else on the arena still works, and you can add a contractor by hand.</div>
+          </div>
+        </div>
+      )}
+
       {/* List */}
       <ul className="mt-3 flex flex-col gap-2">
         <AnimatePresence initial={false}>
@@ -123,7 +138,11 @@ export function ContractorPanel({
           ))}
         </AnimatePresence>
         {contractors.length === 0 && !running && (
-          <li className="rounded-xl border border-dashed border-stone-300 p-4 text-center text-xs text-stone-500">No contractors yet. Add one below or run a search.</li>
+          <li className="rounded-xl border border-dashed border-stone-300 p-4 text-center text-xs text-stone-500">
+            {crawlPaused
+              ? "Nothing saved for this job yet, and live search is paused. Add a contractor below to keep going."
+              : "No contractors yet. Add one below or run a search."}
+          </li>
         )}
         {contractors.length === 0 && running && (
           <>
