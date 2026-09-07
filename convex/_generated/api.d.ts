@@ -12,6 +12,7 @@ import type * as ai from "../ai.js";
 import type * as aiHealth from "../aiHealth.js";
 import type * as auth from "../auth.js";
 import type * as contractors from "../contractors.js";
+import type * as crawlCache from "../crawlCache.js";
 import type * as crons from "../crons.js";
 import type * as demo from "../demo.js";
 import type * as http from "../http.js";
@@ -50,6 +51,7 @@ declare const fullApi: ApiFromModules<{
   aiHealth: typeof aiHealth;
   auth: typeof auth;
   contractors: typeof contractors;
+  crawlCache: typeof crawlCache;
   crons: typeof crons;
   demo: typeof demo;
   http: typeof http;
