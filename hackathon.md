@@ -4,7 +4,7 @@
 - **Event:** Convex All Gas Hackathon
 - **What it does:** Posts one home-repair job, finds local contractors, emails them all from a single inbox, and normalizes every reply into a ranked quote on a live leaderboard.
 - **Live app:** https://polished-dragon-158.convex.site
-- **Repo:** none
+- **Repo:** https://github.com/chinesepowered/quote-arena
 - **Frontend:** Convex static hosting
 - **Convex deployment:** https://polished-dragon-158.convex.cloud
 - **Components:** @convex-dev/static-hosting, @convex-dev/rate-limiter, @convex-dev/agent
