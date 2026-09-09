@@ -2,7 +2,7 @@
 
 *Post a home-repair job once. Watch the quotes fight it out on a live leaderboard.*
 
-🌐 **[Live demo](https://polished-dragon-158.convex.site)** · 🎬 Demo video: `TODO: video link` · 📓 [Build log](hackathon.md)
+🌐 **[Live demo](https://polished-dragon-158.convex.site)** · 🎬 Demo video: [Watch the demo](https://www.youtube.com/watch?v=dixtNz7GDkU) · 📓 [Build log](hackathon.md)
 Jump straight to a populated board: **[/j/demo-back-fence](https://polished-dragon-158.convex.site/j/demo-back-fence)**
 
 > ⚠️ The demo runs on free tiers of Convex, OpenAI, Firecrawl and AgentMail, so under load some features may be rate-limited — the video shows the full flow.
